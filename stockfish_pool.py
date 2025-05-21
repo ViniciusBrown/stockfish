@@ -71,6 +71,21 @@ class StockfishAnalysisType(TypedDict):
     summary: AnalysisSummaryType
     game_phases: Dict[str, List[int]]  # New: mapping of game phases to move numbers
 
+def list_files_in_directory(directory_path):
+    """Lists all files in the specified directory.
+
+    Args:
+        directory_path: The path to the directory.
+    """
+    try:
+        files = os.listdir(directory_path)
+        for file in files:
+            print(file)
+    except FileNotFoundError:
+        print(f"Error: Directory '{directory_path}' not found.")
+    except Exception as e:
+        print(f"An error occurred: {e}")
+
 class StockfishPool:
     """
     An enhanced pool for parallel Stockfish analysis using multiple processes.
@@ -88,11 +103,19 @@ class StockfishPool:
         if not stockfish_path:
             # Common locations
             possible_paths = [
-                "/usr/local/bin/stockfish",
-                "/usr/bin/stockfish",
-                "stockfish"  # Rely on PATH
+                #"stockfish-windows-x86-64-avx2.exe",
+                "./stockfish-ubuntu-x86-64-avx2"
             ]
 
+            # Get the current working directory
+            current_directory = os.getcwd()
+            print(f"Current directory: {current_directory}")
+            files = os.listdir(current_directory)
+            print("Files in current directory:")
+            for file in files:
+                print(file)
+           
+            
             for path in possible_paths:
                 if os.path.exists(path) or os.system(f"which {path} > /dev/null 2>&1") == 0:
                     stockfish_path = path

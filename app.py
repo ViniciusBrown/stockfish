@@ -21,6 +21,7 @@ def post_example():
         pgn = data.get('pgn')
         if pgn:
             response = stockfish_pool.analyze_pgn(pgn)
+            print("Response:")
             print(response)
             return jsonify(response), 201
         else:
