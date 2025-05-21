@@ -227,6 +227,7 @@ class StockfishPool:
         if depth is None:
             depth = self.default_depth
 
+        engine = None
         try:
             engine = chess.engine.SimpleEngine.popen_uci(self.stockfish_path)
             board = chess.Board(fen)
@@ -297,10 +298,11 @@ class StockfishPool:
                 "error": str(e)
             }
         finally:
-            try:
-                engine.quit()
-            except Exception as e:
-                logger.error(f"Error closing engine: {e}")
+            if engine:
+                try:
+                    engine.quit()
+                except Exception as e:
+                    logger.error(f"Error closing engine: {e}")
 
     def analyze_pgn(self, pgn_str: str, depth: int = None) -> StockfishAnalysisType:
         """Analyze a complete PGN."""
@@ -539,3 +541,93 @@ class StockfishPool:
             "best_moves": best_moves,
             "avg_centipawn_loss": round(avg_centipawn_loss, 1)
         }
+
+    def _convert_positions_format(self, positions: List[Dict[str, Any]]) -> List[PositionDataType]:
+        """Convert analyzed positions into the standardized format."""
+        converted = []
+        for pos in positions:
+            converted_pos: PositionDataType = {
+                "fen": pos["fen"],
+                "move_number": pos["move_number"],
+                "ply": pos["ply"],
+                "move": pos.get("move"),
+                "color": pos["color"],
+                "evaluation": pos.get("evaluation"),
+                "top_moves": pos.get("top_moves"),
+                "depth": pos.get("depth"),
+                "eval_change": pos.get("eval_change"),
+                "move_quality": None,  # Will be set in _process_analysis_results
+                "position_type": pos.get("position_type")
+            }
+            converted.append(converted_pos)
+        return converted
+
+    def _identify_game_phases(self, positions: List[PositionDataType]) -> Dict[str, List[int]]:
+        """Identify the phases of the game based on position types."""
+        phases: Dict[str, List[int]] = {
+            "opening": [],
+            "middlegame": [],
+            "endgame": []
+        }
+        
+        for pos in positions:
+            if pos.get("position_type") in phases:
+                phases[pos["position_type"]].append(pos["move_number"])
+        
+        return phases
+
+    def _identify_key_positions(self, positions: List[PositionDataType]) -> List[KeyPositionType]:
+        """Identify key positions in the game based on evaluation changes and move quality."""
+        key_positions: List[KeyPositionType] = []
+        
+        for pos in positions:
+            if not pos.get("eval_change") or not pos.get("move"):
+                continue
+                
+            eval_change = pos["eval_change"]
+            move_quality = self._classify_move_quality(eval_change=eval_change)
+            
+            # Key positions are those with significant evaluation changes
+            if abs(eval_change) >= 100 or move_quality in ["blunder", "mistake"]:
+                alt_moves = []
+                if pos.get("top_moves"):
+                    for move in pos["top_moves"]:
+                        if move["move"] != pos["move"]:  # Only include alternative moves
+                            alt_moves.append({
+                                "move": move["move"],
+                                "evaluation": move["centipawn"],
+                                "line": move["move_line"]
+                            })
+                
+                key_pos: KeyPositionType = {
+                    "fen": pos["fen"],
+                    "move_number": pos["move_number"],
+                    "move": pos["move"],
+                    "color": pos["color"],
+                    "eval_change": eval_change,
+                    "move_quality": move_quality,
+                    "description": self._generate_position_description(pos, eval_change, move_quality),
+                    "alternative_moves": alt_moves,
+                    "position_type": pos.get("position_type", "middlegame")
+                }
+                key_positions.append(key_pos)
+        
+        return key_positions
+
+    def _generate_position_description(self, position: Dict[str, Any], eval_change: float, move_quality: str) -> str:
+        """Generate a human-readable description of a key position."""
+        color = "White" if position["color"] == "w" else "Black"
+        move_desc = f"{color} played {position['move']}"
+        
+        if move_quality == "blunder":
+            desc = f"{move_desc}, missing a much better continuation"
+        elif move_quality == "mistake":
+            desc = f"{move_desc}, overlooking a stronger option"
+        elif move_quality == "inaccuracy":
+            desc = f"{move_desc}, slightly inaccurate"
+        elif abs(eval_change) >= 200:
+            desc = f"{move_desc}, a decisive move that significantly changed the position"
+        else:
+            desc = move_desc
+            
+        return desc
